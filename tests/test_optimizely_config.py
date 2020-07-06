@@ -455,8 +455,7 @@ class OptimizelyConfigTest(base.BaseTest):
                     'key': 'test_feature_in_experiment_and_rollout'
                 }
             },
-            'revision': '1',
-            'datafile': json.dumps(self.config_dict_with_features)
+            'revision': '1'
         }
 
         self.actual_config = self.opt_config_service.get_config()
@@ -538,11 +537,3 @@ class OptimizelyConfigTest(base.BaseTest):
             self.assertIsInstance(variable, optimizely_config.OptimizelyVariable)
 
         self.assertEqual(expected_variables_map, self.to_dict(actual_variables_map))
-
-    def test__get_datafile(self):
-        """ Test that get_datafile returns the expected datafile. """
-
-        expected_datafile = json.dumps(self.config_dict_with_features)
-        actual_datafile = self.actual_config.get_datafile()
-
-        self.assertEqual(expected_datafile, actual_datafile)
