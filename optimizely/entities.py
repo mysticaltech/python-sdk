@@ -10,6 +10,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import uuid
 
 
 class BaseEntity(object):
@@ -113,7 +114,7 @@ class Variable(BaseEntity):
 
 class Variation(BaseEntity):
     class VariableUsage(BaseEntity):
-        def __init__(self, id, value, **kwards):
+        def __init__(self, id, value, **kwargs):
             self.id = id
             self.value = value
 
@@ -122,3 +123,42 @@ class Variation(BaseEntity):
         self.key = key
         self.featureEnabled = featureEnabled
         self.variables = variables or []
+
+
+class OptimizelyDecision(BaseEntity):
+    """ Class encapsulating Decision functionality. """
+
+    def __init__(self, variation_key, enabled, key, variables, user, reasons):
+        self.variation_key = variation_key
+        self.enabled = enabled
+        self.variables = variables
+        self.key = key
+        self.user = user
+        self.reasons = reasons
+
+
+# TODO: MAYBE THIS FUNCTION WILL BE PLACED SOMEWHERE ELSE
+def error_decision(key, user, reason):
+    """ Return a decision error. """
+    return OptimizelyDecision(variation_key=None,
+                              enabled=None,
+                              key=key,
+                              user=user,
+                              reasons=[reason])
+
+
+class OptimizelyUserContext(BaseEntity):
+    """ UserContext holds information about a user. """
+
+    # def __init__(self, user_id, attributes, OptimizelyDecideOptions):
+    def __init__(self, user_id, attributes):
+        self.user_id = user_id
+        self.attributes = attributes
+        # self.default_decide_options = OptimizelyDecideOptions
+        # <--- WILL I NEED THIS??? Because it is used in decide API
+
+        if self.user_id == "":
+            self.user_id = str(uuid.uuid1())
+
+        if self.attributes is None:  # should "==" be used?
+            self.attributes = {}

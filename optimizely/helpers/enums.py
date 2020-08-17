@@ -110,7 +110,9 @@ class Errors(object):
     NONE_FEATURE_KEY_PARAMETER = '"None" is an invalid value for feature key.'
     NONE_USER_ID_PARAMETER = '"None" is an invalid value for user ID.'
     NONE_VARIABLE_KEY_PARAMETER = '"None" is an invalid value for variable key.'
+    SDK_NOT_READY = 'Optimizely SDK not configured properly yet.'
     UNSUPPORTED_DATAFILE_VERSION = 'This version of the Python SDK does not support the given datafile version: "{}".'
+    USER_NOT_SET = 'User not set properly yet.'
 
 
 class HTTPHeaders(object):
@@ -157,3 +159,12 @@ class NotificationTypes(object):
     OPTIMIZELY_CONFIG_UPDATE = 'OPTIMIZELY_CONFIG_UPDATE'
     TRACK = 'TRACK:event_key, user_id, attributes, event_tags, event'
     LOG_EVENT = 'LOG_EVENT:log_event'
+
+
+class OptimizelyDecideOption(object):
+    """ OptimizelyDecideOptions represents Optimizely decide api options """
+    DISABLE_TRACKING = False
+    ENABLED_ONLY = False
+    BYPASS_UPS = False
+    FOR_EXPERIMENT = False
+    INCLUDE_REASONS = False

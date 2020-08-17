@@ -10,6 +10,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import json
+
 from six import string_types
 
 from . import decision_service
@@ -20,6 +22,7 @@ from . import logger as _logging
 from .config_manager import AuthDatafilePollingConfigManager
 from .config_manager import PollingConfigManager
 from .config_manager import StaticConfigManager
+from .entities import OptimizelyDecision
 from .error_handler import NoOpErrorHandler as noop_error_handler
 from .event import event_factory, user_event_factory
 from .event.event_processor import ForwardingEventProcessor
@@ -77,7 +80,8 @@ class Optimizely(object):
         self.config_manager = config_manager
         self.notification_center = notification_center or NotificationCenter(self.logger)
         self.event_processor = event_processor or ForwardingEventProcessor(
-            self.event_dispatcher, logger=self.logger, notification_center=self.notification_center,
+            self.event_dispatcher, logger=self.logger,
+            notification_center=self.notification_center,
         )
 
         try:
@@ -102,15 +106,18 @@ class Optimizely(object):
             if sdk_key:
                 config_manager_options['sdk_key'] = sdk_key
                 if datafile_access_token:
-                    config_manager_options['datafile_access_token'] = datafile_access_token
-                    self.config_manager = AuthDatafilePollingConfigManager(**config_manager_options)
+                    config_manager_options[
+                        'datafile_access_token'] = datafile_access_token
+                    self.config_manager = AuthDatafilePollingConfigManager(
+                        **config_manager_options)
                 else:
                     self.config_manager = PollingConfigManager(**config_manager_options)
             else:
                 self.config_manager = StaticConfigManager(**config_manager_options)
 
         self.event_builder = event_builder.EventBuilder()
-        self.decision_service = decision_service.DecisionService(self.logger, user_profile_service)
+        self.decision_service = decision_service.DecisionService(self.logger,
+                                                                 user_profile_service)
 
     def _validate_instantiation_options(self):
         """ Helper method to validate all instantiation parameters.
@@ -118,23 +125,30 @@ class Optimizely(object):
     Raises:
       Exception if provided instantiation options are valid.
     """
-        if self.config_manager and not validator.is_config_manager_valid(self.config_manager):
-            raise exceptions.InvalidInputException(enums.Errors.INVALID_INPUT.format('config_manager'))
+        if self.config_manager and not validator.is_config_manager_valid(
+                self.config_manager):
+            raise exceptions.InvalidInputException(
+                enums.Errors.INVALID_INPUT.format('config_manager'))
 
         if not validator.is_event_dispatcher_valid(self.event_dispatcher):
-            raise exceptions.InvalidInputException(enums.Errors.INVALID_INPUT.format('event_dispatcher'))
+            raise exceptions.InvalidInputException(
+                enums.Errors.INVALID_INPUT.format('event_dispatcher'))
 
         if not validator.is_logger_valid(self.logger):
-            raise exceptions.InvalidInputException(enums.Errors.INVALID_INPUT.format('logger'))
+            raise exceptions.InvalidInputException(
+                enums.Errors.INVALID_INPUT.format('logger'))
 
         if not validator.is_error_handler_valid(self.error_handler):
-            raise exceptions.InvalidInputException(enums.Errors.INVALID_INPUT.format('error_handler'))
+            raise exceptions.InvalidInputException(
+                enums.Errors.INVALID_INPUT.format('error_handler'))
 
         if not validator.is_notification_center_valid(self.notification_center):
-            raise exceptions.InvalidInputException(enums.Errors.INVALID_INPUT.format('notification_center'))
+            raise exceptions.InvalidInputException(
+                enums.Errors.INVALID_INPUT.format('notification_center'))
 
         if not validator.is_event_processor_valid(self.event_processor):
-            raise exceptions.InvalidInputException(enums.Errors.INVALID_INPUT.format('event_processor'))
+            raise exceptions.InvalidInputException(
+                enums.Errors.INVALID_INPUT.format('event_processor'))
 
     def _validate_user_inputs(self, attributes=None, event_tags=None):
         """ Helper method to validate user inputs.
@@ -150,17 +164,20 @@ class Optimizely(object):
 
         if attributes and not validator.are_attributes_valid(attributes):
             self.logger.error('Provided attributes are in an invalid format.')
-            self.error_handler.handle_error(exceptions.InvalidAttributeException(enums.Errors.INVALID_ATTRIBUTE_FORMAT))
+            self.error_handler.handle_error(exceptions.InvalidAttributeException(
+                enums.Errors.INVALID_ATTRIBUTE_FORMAT))
             return False
 
         if event_tags and not validator.are_event_tags_valid(event_tags):
             self.logger.error('Provided event tags are in an invalid format.')
-            self.error_handler.handle_error(exceptions.InvalidEventTagException(enums.Errors.INVALID_EVENT_TAG_FORMAT))
+            self.error_handler.handle_error(exceptions.InvalidEventTagException(
+                enums.Errors.INVALID_EVENT_TAG_FORMAT))
             return False
 
         return True
 
-    def _send_impression_event(self, project_config, experiment, variation, user_id, attributes):
+    def _send_impression_event(self, project_config, experiment, variation, user_id,
+                               attributes):
         """ Helper method to send impression event.
 
     Args:
@@ -180,14 +197,17 @@ class Optimizely(object):
         # Kept for backward compatibility.
         # This notification is deprecated and new Decision notifications
         # are sent via their respective method calls.
-        if len(self.notification_center.notification_listeners[enums.NotificationTypes.ACTIVATE]) > 0:
+        if len(self.notification_center.notification_listeners[
+                   enums.NotificationTypes.ACTIVATE]) > 0:
             log_event = event_factory.EventFactory.create_log_event(user_event, self.logger)
             self.notification_center.send_notifications(
-                enums.NotificationTypes.ACTIVATE, experiment, user_id, attributes, variation, log_event.__dict__,
+                enums.NotificationTypes.ACTIVATE, experiment, user_id, attributes,
+                variation, log_event.__dict__,
             )
 
     def _get_feature_variable_for_type(
-        self, project_config, feature_key, variable_key, variable_type, user_id, attributes,
+            self, project_config, feature_key, variable_key, variable_type, user_id,
+            attributes,
     ):
         """ Helper method to determine value for a certain variable attached to a feature flag based on type of variable.
 
@@ -233,19 +253,23 @@ class Optimizely(object):
         if variable.type != variable_type:
             self.logger.warning(
                 'Requested variable type "%s", but variable is of type "%s". '
-                'Use correct API to retrieve value. Returning None.' % (variable_type, variable.type)
+                'Use correct API to retrieve value. Returning None.' % (
+                    variable_type, variable.type)
             )
             return None
 
         feature_enabled = False
         source_info = {}
         variable_value = variable.defaultValue
-        decision = self.decision_service.get_variation_for_feature(project_config, feature_flag, user_id, attributes)
+        decision = self.decision_service.get_variation_for_feature(project_config,
+                                                                   feature_flag, user_id,
+                                                                   attributes)
         if decision.variation:
 
             feature_enabled = decision.variation.featureEnabled
             if feature_enabled:
-                variable_value = project_config.get_variable_value_for_variation(variable, decision.variation)
+                variable_value = project_config.get_variable_value_for_variation(variable,
+                                                                                 decision.variation)
                 self.logger.info(
                     'Got variable value "%s" for variable "%s" of feature flag "%s".'
                     % (variable_value, variable_key, feature_key)
@@ -253,12 +277,14 @@ class Optimizely(object):
             else:
                 self.logger.info(
                     'Feature "%s" is not enabled for user "%s". '
-                    'Returning the default variable value "%s".' % (feature_key, user_id, variable_value)
+                    'Returning the default variable value "%s".' % (
+                        feature_key, user_id, variable_value)
                 )
         else:
             self.logger.info(
                 'User "%s" is not in any variation or rollout rule. '
-                'Returning default value for variable "%s" of feature flag "%s".' % (user_id, variable_key, feature_key)
+                'Returning default value for variable "%s" of feature flag "%s".' % (
+                    user_id, variable_key, feature_key)
             )
 
         if decision.source == enums.DecisionSources.FEATURE_TEST:
@@ -268,7 +294,8 @@ class Optimizely(object):
             }
 
         try:
-            actual_value = project_config.get_typecast_value(variable_value, variable_type)
+            actual_value = project_config.get_typecast_value(variable_value,
+                                                             variable_type)
         except:
             self.logger.error('Unable to cast value. Returning None.')
             actual_value = None
@@ -291,7 +318,7 @@ class Optimizely(object):
         return actual_value
 
     def _get_all_feature_variables_for_type(
-        self, project_config, feature_key, user_id, attributes,
+            self, project_config, feature_key, user_id, attributes,
     ):
         """ Helper method to determine value for all variables attached to a feature flag.
 
@@ -323,7 +350,9 @@ class Optimizely(object):
         feature_enabled = False
         source_info = {}
 
-        decision = self.decision_service.get_variation_for_feature(project_config, feature_flag, user_id, attributes)
+        decision = self.decision_service.get_variation_for_feature(project_config,
+                                                                   feature_flag, user_id,
+                                                                   attributes)
         if decision.variation:
 
             feature_enabled = decision.variation.featureEnabled
@@ -338,7 +367,8 @@ class Optimizely(object):
         else:
             self.logger.info(
                 'User "%s" is not in any variation or rollout rule. '
-                'Returning default value for all variables of feature flag "%s".' % (user_id, feature_key)
+                'Returning default value for all variables of feature flag "%s".' % (
+                    user_id, feature_key)
             )
 
         all_variables = {}
@@ -346,14 +376,16 @@ class Optimizely(object):
             variable = project_config.get_variable_for_feature(feature_key, variable_key)
             variable_value = variable.defaultValue
             if feature_enabled:
-                variable_value = project_config.get_variable_value_for_variation(variable, decision.variation)
+                variable_value = project_config.get_variable_value_for_variation(variable,
+                                                                                 decision.variation)
                 self.logger.debug(
                     'Got variable value "%s" for variable "%s" of feature flag "%s".'
                     % (variable_value, variable_key, feature_key)
                 )
 
             try:
-                actual_value = project_config.get_typecast_value(variable_value, variable.type)
+                actual_value = project_config.get_typecast_value(variable_value,
+                                                                 variable.type)
             except:
                 self.logger.error('Unable to cast value. Returning None.')
                 actual_value = None
@@ -421,10 +453,111 @@ class Optimizely(object):
         variation = project_config.get_variation_from_key(experiment_key, variation_key)
 
         # Create and dispatch impression event
-        self.logger.info('Activating user "%s" in experiment "%s".' % (user_id, experiment.key))
-        self._send_impression_event(project_config, experiment, variation, user_id, attributes)
+        self.logger.info(
+            'Activating user "%s" in experiment "%s".' % (user_id, experiment.key))
+        self._send_impression_event(project_config, experiment, variation, user_id,
+                                    attributes)
 
         return variation.key
+
+    # ===========   ===========    ==========  ==========
+
+    def decide(self, key, user, options):
+
+        project_config = self.config_manager.get_config()
+        if not project_config:
+            self.logger.error(enums.Errors.INVALID_PROJECT_CONFIG.format('decide'))
+            return entities.error_decision(key, user, reason=enums.Errors.SDK_NOT_READY)
+
+        # verify user is not None
+        if not user:
+            return entities.error_decision(key, user, reason=enums.Errors.USER_NOT_SET)
+
+        # get feature object
+        feature = project_config.get_feature_from_key(key)
+        if not feature.key:
+            # self.logger.error(enums.Errors.INVALID_PROJECT_CONFIG.format('activate'))
+            return entities.error_decision(feature.key, user,
+                                           reason=enums.Errors.INVALID_FEATURE_KEY)
+
+        # Jae has fifth parameter -> options
+        decision = self.decision_service.get_variation_for_feature(project_config,
+                                                                   feature,
+                                                                   user.user_id,
+                                                                   user.attributes)
+        enabled = False
+        if decision.variation.featureEnabled:
+            enabled = True
+
+        decision_variables = self.get_decision_variables(feature=feature,
+                                                         decision=decision,
+                                                         user=None,
+                                                         options=None)
+
+        # check if decision_variables is not None.
+        # If it is None then: "decisionReasons.addError(OptimizelyError.invalidDictionary)"
+
+        # check if it's AB experiment decision (Jae has a separate function for experiments,
+        # Pawel has in the same function)
+        # TODO: implement same logic for AB experiments (replace activate)
+
+        # send impression event
+        decision_from_feature_test = None
+        if decision.experiment and decision.variation:
+            decision_from_feature_test = True
+
+        if not options.DISABLE_TRACKING:
+            self._send_impression_event(
+                project_config, decision.experiment, decision.variation, user.user_id,
+                user.attributes,
+
+                # turn tracking on?
+            )
+
+        # TODO: send decision notification
+        # self.notification_center.send_notifications(
+        #     enums.NotificationTypes.DECISION,
+        #     enums.DecisionNotificationTypes.FEATURE,
+        #     user.user_id,
+        #     user.attributes or {},
+        #     {
+        #         'feature_key': feature_key,
+        #         'feature_enabled': feature_enabled,
+        #         'source': decision.source,
+        #         'source_info': source_info,
+        #     },
+        # )
+
+        return OptimizelyDecision(
+            variation_key=decision.variation.key if decision_from_feature_test else None,
+            enabled=enabled,
+            variables=decision_variables,
+            key=feature.key,
+            user=user,
+            reasons=None)
+
+    def get_decision_variables(self, feature, decision, user, options):
+        """ collect all variables in enabled feature flag. A dict of variable key and value """
+        # could we use existing function "_get_all_feature_variables_for_type"?
+        # but the new funciton has resons and user_context
+
+        flag_variables = feature.variables
+        decision_variables = decision.variation.variables
+
+        # get id-s as values
+        flag_variables_ids = {k: v.id for k, v in flag_variables.items()}
+
+        all_variables = {}
+        for k, v in flag_variables_ids.items():
+            for dec_var in decision_variables:
+                if dec_var['id'] == v:
+                    all_variables[k] = dec_var['value']
+
+        print('VARIABLES DICT ', all_variables)
+
+        all_variables = json.dumps(all_variables)
+
+        return all_variables
 
     def track(self, event_key, user_id, attributes=None, event_tags=None):
         """ Send conversion event to Optimizely.
@@ -458,7 +591,8 @@ class Optimizely(object):
 
         event = project_config.get_event(event_key)
         if not event:
-            self.logger.info('Not tracking user "%s" for event "%s".' % (user_id, event_key))
+            self.logger.info(
+                'Not tracking user "%s" for event "%s".' % (user_id, event_key))
             return
 
         user_event = user_event_factory.UserEventFactory.create_conversion_event(
@@ -468,10 +602,13 @@ class Optimizely(object):
         self.event_processor.process(user_event)
         self.logger.info('Tracking event "%s" for user "%s".' % (event_key, user_id))
 
-        if len(self.notification_center.notification_listeners[enums.NotificationTypes.TRACK]) > 0:
-            log_event = event_factory.EventFactory.create_log_event(user_event, self.logger)
+        if len(self.notification_center.notification_listeners[
+                   enums.NotificationTypes.TRACK]) > 0:
+            log_event = event_factory.EventFactory.create_log_event(user_event,
+                                                                    self.logger)
             self.notification_center.send_notifications(
-                enums.NotificationTypes.TRACK, event_key, user_id, attributes, event_tags, log_event.__dict__,
+                enums.NotificationTypes.TRACK, event_key, user_id, attributes, event_tags,
+                log_event.__dict__,
             )
 
     def get_variation(self, experiment_key, user_id, attributes=None):
@@ -508,13 +645,16 @@ class Optimizely(object):
         variation_key = None
 
         if not experiment:
-            self.logger.info('Experiment key "%s" is invalid. Not activating user "%s".' % (experiment_key, user_id))
+            self.logger.info(
+                'Experiment key "%s" is invalid. Not activating user "%s".' % (
+                    experiment_key, user_id))
             return None
 
         if not self._validate_user_inputs(attributes):
             return None
 
-        variation = self.decision_service.get_variation(project_config, experiment, user_id, attributes)
+        variation = self.decision_service.get_variation(project_config, experiment,
+                                                        user_id, attributes)
         if variation:
             variation_key = variation.key
 
@@ -546,7 +686,8 @@ class Optimizely(object):
     """
 
         if not self.is_valid:
-            self.logger.error(enums.Errors.INVALID_OPTIMIZELY.format('is_feature_enabled'))
+            self.logger.error(
+                enums.Errors.INVALID_OPTIMIZELY.format('is_feature_enabled'))
             return False
 
         if not validator.is_non_empty_string(feature_key):
@@ -562,7 +703,8 @@ class Optimizely(object):
 
         project_config = self.config_manager.get_config()
         if not project_config:
-            self.logger.error(enums.Errors.INVALID_PROJECT_CONFIG.format('is_feature_enabled'))
+            self.logger.error(
+                enums.Errors.INVALID_PROJECT_CONFIG.format('is_feature_enabled'))
             return False
 
         feature = project_config.get_feature_from_key(feature_key)
@@ -571,7 +713,9 @@ class Optimizely(object):
 
         feature_enabled = False
         source_info = {}
-        decision = self.decision_service.get_variation_for_feature(project_config, feature, user_id, attributes)
+        decision = self.decision_service.get_variation_for_feature(project_config,
+                                                                   feature, user_id,
+                                                                   attributes)
         is_source_experiment = decision.source == enums.DecisionSources.FEATURE_TEST
 
         if decision.variation:
@@ -584,13 +728,16 @@ class Optimizely(object):
                     'variation_key': decision.variation.key,
                 }
                 self._send_impression_event(
-                    project_config, decision.experiment, decision.variation, user_id, attributes,
+                    project_config, decision.experiment, decision.variation, user_id,
+                    attributes,
                 )
 
         if feature_enabled:
-            self.logger.info('Feature "%s" is enabled for user "%s".' % (feature_key, user_id))
+            self.logger.info(
+                'Feature "%s" is enabled for user "%s".' % (feature_key, user_id))
         else:
-            self.logger.info('Feature "%s" is not enabled for user "%s".' % (feature_key, user_id))
+            self.logger.info(
+                'Feature "%s" is not enabled for user "%s".' % (feature_key, user_id))
 
         self.notification_center.send_notifications(
             enums.NotificationTypes.DECISION,
@@ -620,7 +767,8 @@ class Optimizely(object):
 
         enabled_features = []
         if not self.is_valid:
-            self.logger.error(enums.Errors.INVALID_OPTIMIZELY.format('get_enabled_features'))
+            self.logger.error(
+                enums.Errors.INVALID_OPTIMIZELY.format('get_enabled_features'))
             return enabled_features
 
         if not isinstance(user_id, string_types):
@@ -632,7 +780,8 @@ class Optimizely(object):
 
         project_config = self.config_manager.get_config()
         if not project_config:
-            self.logger.error(enums.Errors.INVALID_PROJECT_CONFIG.format('get_enabled_features'))
+            self.logger.error(
+                enums.Errors.INVALID_PROJECT_CONFIG.format('get_enabled_features'))
             return enabled_features
 
         for feature in project_config.feature_key_map.values():
@@ -657,12 +806,16 @@ class Optimizely(object):
     """
         project_config = self.config_manager.get_config()
         if not project_config:
-            self.logger.error(enums.Errors.INVALID_PROJECT_CONFIG.format('get_feature_variable'))
+            self.logger.error(
+                enums.Errors.INVALID_PROJECT_CONFIG.format('get_feature_variable'))
             return None
 
-        return self._get_feature_variable_for_type(project_config, feature_key, variable_key, None, user_id, attributes)
+        return self._get_feature_variable_for_type(project_config, feature_key,
+                                                   variable_key, None, user_id,
+                                                   attributes)
 
-    def get_feature_variable_boolean(self, feature_key, variable_key, user_id, attributes=None):
+    def get_feature_variable_boolean(self, feature_key, variable_key, user_id,
+                                     attributes=None):
         """ Returns value for a certain boolean variable attached to a feature flag.
 
     Args:
@@ -681,14 +834,16 @@ class Optimizely(object):
         variable_type = entities.Variable.Type.BOOLEAN
         project_config = self.config_manager.get_config()
         if not project_config:
-            self.logger.error(enums.Errors.INVALID_PROJECT_CONFIG.format('get_feature_variable_boolean'))
+            self.logger.error(enums.Errors.INVALID_PROJECT_CONFIG.format(
+                'get_feature_variable_boolean'))
             return None
 
         return self._get_feature_variable_for_type(
             project_config, feature_key, variable_key, variable_type, user_id, attributes,
         )
 
-    def get_feature_variable_double(self, feature_key, variable_key, user_id, attributes=None):
+    def get_feature_variable_double(self, feature_key, variable_key, user_id,
+                                    attributes=None):
         """ Returns value for a certain double variable attached to a feature flag.
 
     Args:
@@ -707,14 +862,16 @@ class Optimizely(object):
         variable_type = entities.Variable.Type.DOUBLE
         project_config = self.config_manager.get_config()
         if not project_config:
-            self.logger.error(enums.Errors.INVALID_PROJECT_CONFIG.format('get_feature_variable_double'))
+            self.logger.error(
+                enums.Errors.INVALID_PROJECT_CONFIG.format('get_feature_variable_double'))
             return None
 
         return self._get_feature_variable_for_type(
             project_config, feature_key, variable_key, variable_type, user_id, attributes,
         )
 
-    def get_feature_variable_integer(self, feature_key, variable_key, user_id, attributes=None):
+    def get_feature_variable_integer(self, feature_key, variable_key, user_id,
+                                     attributes=None):
         """ Returns value for a certain integer variable attached to a feature flag.
 
     Args:
@@ -733,14 +890,16 @@ class Optimizely(object):
         variable_type = entities.Variable.Type.INTEGER
         project_config = self.config_manager.get_config()
         if not project_config:
-            self.logger.error(enums.Errors.INVALID_PROJECT_CONFIG.format('get_feature_variable_integer'))
+            self.logger.error(enums.Errors.INVALID_PROJECT_CONFIG.format(
+                'get_feature_variable_integer'))
             return None
 
         return self._get_feature_variable_for_type(
             project_config, feature_key, variable_key, variable_type, user_id, attributes,
         )
 
-    def get_feature_variable_string(self, feature_key, variable_key, user_id, attributes=None):
+    def get_feature_variable_string(self, feature_key, variable_key, user_id,
+                                    attributes=None):
         """ Returns value for a certain string variable attached to a feature.
 
     Args:
@@ -759,14 +918,16 @@ class Optimizely(object):
         variable_type = entities.Variable.Type.STRING
         project_config = self.config_manager.get_config()
         if not project_config:
-            self.logger.error(enums.Errors.INVALID_PROJECT_CONFIG.format('get_feature_variable_string'))
+            self.logger.error(
+                enums.Errors.INVALID_PROJECT_CONFIG.format('get_feature_variable_string'))
             return None
 
         return self._get_feature_variable_for_type(
             project_config, feature_key, variable_key, variable_type, user_id, attributes,
         )
 
-    def get_feature_variable_json(self, feature_key, variable_key, user_id, attributes=None):
+    def get_feature_variable_json(self, feature_key, variable_key, user_id,
+                                  attributes=None):
         """ Returns value for a certain JSON variable attached to a feature.
 
     Args:
@@ -785,7 +946,8 @@ class Optimizely(object):
         variable_type = entities.Variable.Type.JSON
         project_config = self.config_manager.get_config()
         if not project_config:
-            self.logger.error(enums.Errors.INVALID_PROJECT_CONFIG.format('get_feature_variable_json'))
+            self.logger.error(
+                enums.Errors.INVALID_PROJECT_CONFIG.format('get_feature_variable_json'))
             return None
 
         return self._get_feature_variable_for_type(
@@ -807,7 +969,8 @@ class Optimizely(object):
 
         project_config = self.config_manager.get_config()
         if not project_config:
-            self.logger.error(enums.Errors.INVALID_PROJECT_CONFIG.format('get_all_feature_variables'))
+            self.logger.error(
+                enums.Errors.INVALID_PROJECT_CONFIG.format('get_all_feature_variables'))
             return None
 
         return self._get_all_feature_variables_for_type(
@@ -828,7 +991,8 @@ class Optimizely(object):
     """
 
         if not self.is_valid:
-            self.logger.error(enums.Errors.INVALID_OPTIMIZELY.format('set_forced_variation'))
+            self.logger.error(
+                enums.Errors.INVALID_OPTIMIZELY.format('set_forced_variation'))
             return False
 
         if not validator.is_non_empty_string(experiment_key):
@@ -841,10 +1005,12 @@ class Optimizely(object):
 
         project_config = self.config_manager.get_config()
         if not project_config:
-            self.logger.error(enums.Errors.INVALID_PROJECT_CONFIG.format('set_forced_variation'))
+            self.logger.error(
+                enums.Errors.INVALID_PROJECT_CONFIG.format('set_forced_variation'))
             return False
 
-        return self.decision_service.set_forced_variation(project_config, experiment_key, user_id, variation_key)
+        return self.decision_service.set_forced_variation(project_config, experiment_key,
+                                                          user_id, variation_key)
 
     def get_forced_variation(self, experiment_key, user_id):
         """ Gets the forced variation for a given user and experiment.
@@ -858,7 +1024,8 @@ class Optimizely(object):
     """
 
         if not self.is_valid:
-            self.logger.error(enums.Errors.INVALID_OPTIMIZELY.format('get_forced_variation'))
+            self.logger.error(
+                enums.Errors.INVALID_OPTIMIZELY.format('get_forced_variation'))
             return None
 
         if not validator.is_non_empty_string(experiment_key):
@@ -871,10 +1038,13 @@ class Optimizely(object):
 
         project_config = self.config_manager.get_config()
         if not project_config:
-            self.logger.error(enums.Errors.INVALID_PROJECT_CONFIG.format('get_forced_variation'))
+            self.logger.error(
+                enums.Errors.INVALID_PROJECT_CONFIG.format('get_forced_variation'))
             return None
 
-        forced_variation = self.decision_service.get_forced_variation(project_config, experiment_key, user_id)
+        forced_variation = self.decision_service.get_forced_variation(project_config,
+                                                                      experiment_key,
+                                                                      user_id)
         return forced_variation.key if forced_variation else None
 
     def get_optimizely_config(self):
@@ -885,12 +1055,14 @@ class Optimizely(object):
             project config isn't available.
         """
         if not self.is_valid:
-            self.logger.error(enums.Errors.INVALID_OPTIMIZELY.format('get_optimizely_config'))
+            self.logger.error(
+                enums.Errors.INVALID_OPTIMIZELY.format('get_optimizely_config'))
             return None
 
         project_config = self.config_manager.get_config()
         if not project_config:
-            self.logger.error(enums.Errors.INVALID_PROJECT_CONFIG.format('get_optimizely_config'))
+            self.logger.error(
+                enums.Errors.INVALID_PROJECT_CONFIG.format('get_optimizely_config'))
             return None
 
         # Customized Config Manager may not have optimizely_config defined.
